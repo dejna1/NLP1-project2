@@ -1,0 +1,9 @@
+word_a,word_b,a_in_vocabulary,b_in_vocabulary,cosine_similarity
+woman,women,True,True,0.7409337759017944
+immigrant,immigrants,True,True,0.8399255275726318
+migrant,refugee,True,True,0.67545485496521
+hate,hatred,True,True,0.7263606786727905
+love,hate,True,True,0.7127140760421753
+good,bad,True,True,0.8331156969070435
+illegal,immigrant,True,True,0.4707663953304291
+not,hate,True,True,0.4291389286518097

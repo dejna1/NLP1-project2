@@ -1,0 +1,67 @@
+{
+  "seeds": [
+    0
+  ],
+  "folds": 5,
+  "epochs": 20,
+  "patience": 4,
+  "batch_size": 64,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "configs": [
+    "pool_mean",
+    "lstm_20",
+    "lstm_50",
+    "lstm_dropout",
+    "lstm_finetune",
+    "lstm_halfdata"
+  ],
+  "device": "auto",
+  "device_used": "cpu",
+  "vocab_size": 14466,
+  "config_details": {
+    "pool_mean": {
+      "encoder": "pool",
+      "hidden_size": 0,
+      "word_dropout": 0.0,
+      "trainable": false,
+      "fraction": 1.0
+    },
+    "lstm_20": {
+      "encoder": "lstm",
+      "hidden_size": 20,
+      "word_dropout": 0.0,
+      "trainable": false,
+      "fraction": 1.0
+    },
+    "lstm_50": {
+      "encoder": "lstm",
+      "hidden_size": 50,
+      "word_dropout": 0.0,
+      "trainable": false,
+      "fraction": 1.0
+    },
+    "lstm_dropout": {
+      "encoder": "lstm",
+      "hidden_size": 20,
+      "word_dropout": 0.2,
+      "trainable": false,
+      "fraction": 1.0
+    },
+    "lstm_finetune": {
+      "encoder": "lstm",
+      "hidden_size": 20,
+      "word_dropout": 0.0,
+      "trainable": true,
+      "fraction": 1.0
+    },
+    "lstm_halfdata": {
+      "encoder": "lstm",
+      "hidden_size": 20,
+      "word_dropout": 0.0,
+      "trainable": false,
+      "fraction": 0.5
+    }
+  },
+  "validation_policy": "Stratified K-fold on train split; test unused"
+}

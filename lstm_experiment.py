@@ -1,4 +1,5 @@
-"""Requirements 4–5: paired, repeated-stratified CV comparing LSTM and embed-and-pool.
+"""
+Requirements 4–5: paired, repeated-stratified CV comparing LSTM and embed-and-pool.
 
 Place beside embed_pool_experiment_fixed.py, lstm_fixed.py, embedding_analysis.py,
 and utils.py. Uses only the TweetEval training split for cross-validation.
@@ -22,6 +23,8 @@ from embed_pool_experiment import (
     collate_batch, run_epoch, set_seed,
 )
 from models.lstm import LSTMEncoder
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT / 'results' / 'recurrent_experiments'
@@ -97,14 +100,34 @@ def one_run(config_name, config, seed, fold, training, validation, matrix,
                 break
     model.load_state_dict(best_state)
     selected = run_epoch(model, validation_loader, device)
+
+    # Collect predictions from the best checkpoint
+    true_labels, predictions = get_predictions(model, validation_loader, device)
+
     result = dict(config=config_name, seed=seed, fold=fold, best_epoch=best_epoch,
                   train_examples=len(training), val_examples=len(validation),
                   **{f'val_{k}': v for k, v in selected.items()})
     del model, optimizer
     if device == 'cuda':
         torch.cuda.empty_cache()
-    return result, history
+    return result, history, true_labels, predictions
 
+def get_predictions(model, loader, device):
+    model.eval()
+    predictions = []
+    true_labels = []
+
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            logits = model(x)
+
+            predictions.extend(
+                logits.argmax(dim=-1).cpu().tolist()
+            )
+            true_labels.extend(y.tolist())
+
+    return true_labels, predictions
 
 def main():
     parser = argparse.ArgumentParser()
@@ -136,6 +159,8 @@ def main():
     examples = prepare_examples(texts, labels, tokenizer, vocab.default_index)
     labels = np.asarray(labels)
     rows, histories = [], []
+    all_predictions = []
+
     for seed in args.seeds:
         cv = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=seed)
         for fold, (train_idx, val_idx) in enumerate(cv.split(np.zeros(len(labels)), labels)):
@@ -149,14 +174,66 @@ def main():
                         stratify=labels[train_idx], random_state=seed * 1000 + fold)
                 training = [examples[i] for i in selected_idx]
                 print(f'seed={seed} fold={fold + 1}/{args.folds} config={config_name}', flush=True)
-                result, hist = one_run(config_name, config, seed, fold, training,
-                                       validation, matrix, vocab.index('<pad>'), device, args)
+                result, hist, true_labels, predictions = one_run(config_name, config, seed, fold, training,
+                    validation, matrix, vocab.index('<pad>'), device, args)
+
+                for idx, true, pred in zip(val_idx, true_labels, predictions):
+                    all_predictions.append({
+                        'config': config_name,
+                        'seed': seed,
+                        'fold': fold,
+                        'example_idx': int(idx),
+                        'true_label': int(true),
+                        'predicted_label': int(pred)
+                    })
                 rows.append(result)
                 histories.extend(hist)
                 # Save progress even when running a long experiment.
                 pd.DataFrame(rows).to_csv(RESULTS_DIR / 'fold_results.csv', index=False)
                 pd.DataFrame(histories).to_csv(RESULTS_DIR / 'epoch_history.csv', index=False)
                 print(f"  macro_f1={result['val_macro_f1']:.4f}, hate_f1={result['val_hate_f1']:.4f}")
+
+    predictions_df = pd.DataFrame(all_predictions)
+    
+    # Restore original tweet text
+    predictions_df['text'] = predictions_df['example_idx'].apply(lambda idx: str(texts[idx]))
+    # Keep only incorrect predictions
+    errors_df = predictions_df[predictions_df['true_label'] != predictions_df['predicted_label']].copy()
+    # Categorise classification errors
+    errors_df['error_type'] = np.where((errors_df['true_label'] == 1) & (errors_df['predicted_label'] == 0), 'False Negative', 'False Positive')
+    errors_df = errors_df[[
+        'config',
+        'seed',
+        'fold',
+        'example_idx',
+        'text',
+        'true_label',
+        'predicted_label',
+        'error_type'
+    ]]
+    errors_df.to_csv(RESULTS_DIR / 'misclassified_examples.csv', index=False)
+    
+    predictions_df.to_csv(RESULTS_DIR / 'predictions.csv', index=False)
+    for config_name in args.configs:
+        subset = predictions_df[(predictions_df['config'] == config_name) & (predictions_df['seed'] == args.seeds[0])]
+        cm = confusion_matrix(subset['true_label'], subset['predicted_label'], labels=[0, 1])
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Not Hate', 'Hate'])
+        fig, ax = plt.subplots(figsize=(6, 5))
+        disp.plot(ax=ax, cmap='Blues', colorbar=False)
+        ax.set_title(f'Confusion Matrix: {config_name}')
+        fig.tight_layout()
+        fig.savefig(RESULTS_DIR / f'confusion_matrix_{config_name}.png', dpi=300)
+        plt.close(fig)
+
+    # Compare Embed-and-Pool and LSTM_20
+    comparison = predictions_df[(predictions_df['seed'] == args.seeds[0]) & (predictions_df['config'].isin(['pool_mean', 'lstm_20']))].copy()
+    wide = comparison.pivot(index='example_idx', columns='config', values='predicted_label')
+    wide = wide.join(comparison.drop_duplicates('example_idx').set_index('example_idx')[['text', 'true_label']])
+    wide['pool_correct'] = (wide['pool_mean'] == wide['true_label'])
+    wide['lstm_correct'] = (wide['lstm_20'] == wide['true_label'])
+    wide['comparison'] = np.select([(~wide['pool_correct']) & wide['lstm_correct'], wide['pool_correct'] & (~wide['lstm_correct']), (~wide['pool_correct']) & (~wide['lstm_correct'])],
+        ['LSTM correct, pooling wrong', 'Pooling correct, LSTM wrong', 'Both wrong'], default='Both correct')
+    wide.to_csv(RESULTS_DIR / 'lstm_vs_pool_error_comparison.csv')
 
     results = pd.DataFrame(rows)
     summary = results.groupby('config', as_index=False).agg(
@@ -178,9 +255,9 @@ def main():
             ['mean','std','count']).to_csv(RESULTS_DIR / 'paired_summary.csv')
 
     with (RESULTS_DIR / 'settings.json').open('w') as handle:
-        json.dump(dict(**vars(args), device_used=device, vocab_size=len(vocab),
-                       configs={k: CONFIGS[k] for k in args.configs},
-                       validation_policy='Stratified K-fold on train split; test unused'),
+        json.dump({**vars(args), 'device_used': device, 'vocab_size': len(vocab),
+                  'config_details': {k: CONFIGS[k] for k in args.configs},
+                  'validation_policy': 'Stratified K-fold on train split; test unused'},
                   handle, indent=2)
     print('\n' + summary.to_string(index=False))
     print(f'\nOutputs: {RESULTS_DIR}')

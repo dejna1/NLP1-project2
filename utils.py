@@ -56,16 +56,19 @@ def download_pretrained(option):
     return destination, dims, skip_first
 
 
-def collate_sequences(sequences, padding_value=0):    
+def collate_sequences(sequences, padding_value=0):
     """
-    This is a helper to batch tokenized sequences of variable length into a torch tensor with shape (num_sequences, longest_seq_length)
-    sequences: list of tokenized texts (each text is a list of token ids)
-    padding_value: the id of the pad symbol
+    Pad variable-length token sequences into a tensor.
+
+    Returns:
+        Tensor of shape (batch_size, max_seq_length)
     """
-    text, labels = sequences
-    labels = torch.tensor([len(x) for x in sequences], dtype=torch.long)
-    text = pad_sequence([torch.tensor(seq, dtype=torch.long) for seq in sequences], batch_first=True, padding_value=padding_value)
-    return text, labels
+    text = pad_sequence(
+        [torch.tensor(seq, dtype=torch.long) for seq in sequences],
+        batch_first=True,
+        padding_value=padding_value
+    )
+    return text
 
 
 class Vocabulary:
